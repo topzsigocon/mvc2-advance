@@ -13,7 +13,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Official devkitPro image – already has devkitARM + gba-dev packages
     container:
       image: devkitpro/devkitarm:latest
 
@@ -21,27 +20,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install extra tools + clone Butano
+      - name: Setup environment + clone Butano
         run: |
-          which python3 || which python
-          which make
-          which arm-none-eabi-gcc
+          set -euo pipefail
+
+          # Official image uses these paths
+          export DEVKITPRO=/opt/devkitpro
+          export DEVKITARM=/opt/devkitpro/devkitARM
+          export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+
+          echo "=== Environment ==="
           echo "DEVKITPRO=$DEVKITPRO"
           echo "DEVKITARM=$DEVKITARM"
+          echo "PATH=$PATH"
+          echo ""
 
+          echo "=== Checking tools ==="
+          which python3 || which python || echo "python not found"
+          which make || echo "make not found"
+          which arm-none-eabi-gcc || echo "arm-none-eabi-gcc not in PATH yet"
+          ls -la $DEVKITARM/bin/arm-none-eabi-gcc || ls -la /opt/devkitpro/devkitARM/bin/ || true
+          echo ""
+
+          echo "=== Cloning Butano ==="
           git clone --depth 1 https://github.com/GValiente/butano.git /tmp/butano
           sed -i 's|LIBBUTANO    := ../butano/butano|LIBBUTANO    := /tmp/butano/butano|' Makefile
           ls -la /tmp/butano/butano
+          echo "Butano ready."
 
       - name: Build ROM
         run: |
-          export DEVKITPRO=${DEVKITPRO:-/opt/devkitpro}
-          export DEVKITARM=${DEVKITARM:-/opt/devkitpro/devkitARM}
+          set -euo pipefail
+          export DEVKITPRO=/opt/devkitpro
+          export DEVKITARM=/opt/devkitpro/devkitARM
           export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
-          make -j$(nproc) 2>&1 || make -j1 2>&1
+
+          echo "Building with:"
+          which arm-none-eabi-gcc
+          arm-none-eabi-gcc --version | head -1
+
+          make -j$(nproc)
 
       - name: Verify ROM exists
         run: |
+          set -euo pipefail
           test -f mvc2_gba_fan.gba || { echo "ROM not found"; ls -la; exit 1; }
           ls -lh mvc2_gba_fan.gba
           file mvc2_gba_fan.gba || true
