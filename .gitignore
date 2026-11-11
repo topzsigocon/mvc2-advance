@@ -1,0 +1,29 @@
+# Build
+build/
+*.gba
+*.elf
+*.map
+*.sav
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Butano / toolchain temp
+*.o
+*.d
+*.i
+*.s
+*.bin
+
+# Zips (handled by unpack workflow)
+*.zip
+updates/*.zip
+
+# Python
+__pycache__/
+*.pyc
