@@ -24,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Unpack ZIP updates safely
+      - name: Safely unpack the uploaded project ZIP
         id: unpack
         shell: bash
         run: |
@@ -36,15 +36,22 @@ jobs:
             exit 0
           fi
 
-          names=""
+          names=()
           for z in "${zips[@]}"; do
             unzip -tq "$z" >/dev/null
-            if unzip -Z1 "$z" | grep -Eq '(^/|(^|/)\\.\\.(/|$))'; then
+
+            # Reject absolute paths, traversal, and symlinks before extraction.
+            if unzip -Z1 "$z" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
               echo "::error::$z contains unsafe paths"
+              exit 1
+            fi
+            if zipinfo -l "$z" | awk 'NR > 3 && substr($1,1,1) == "l" { found=1 } END { exit !found }'; then
+              echo "::error::$z contains symbolic links"
               exit 1
             fi
 
             tmp="$(mktemp -d)"
+            trap 'rm -rf "$tmp"' EXIT
             unzip -q "$z" -d "$tmp"
             src="$tmp"
             mapfile -t top < <(find "$tmp" -mindepth 1 -maxdepth 1)
@@ -52,16 +59,30 @@ jobs:
               src="${top[0]}"
             fi
 
+            # Add/update project files, but never bulk-overwrite repository metadata.
             rsync -a --exclude='.git/' --exclude='.github/' --exclude='*.zip' "$src"/ ./
+
+            # The only workflow file this ZIP may replace is the build workflow.
+            # The running unpack workflow and all other repository workflows stay intact.
+            ci_source="$src/.github/workflows/ci.yml"
+            if [ -f "$ci_source" ]; then
+              mkdir -p .github/workflows
+              install -m 0644 "$ci_source" .github/workflows/ci.yml
+            else
+              echo "::error::ZIP must include .github/workflows/ci.yml"
+              exit 1
+            fi
+
             git rm -q -f -- "$z"
             rm -rf "$tmp"
-            names="$names $(basename "$z")"
+            trap - EXIT
+            names+=("$(basename "$z")")
           done
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "names=${names# }" >> "$GITHUB_OUTPUT"
+          printf 'names=%s\n' "${names[*]}" >> "$GITHUB_OUTPUT"
 
-      - name: Commit and push
+      - name: Commit and push update
         if: steps.unpack.outputs.changed == 'true'
         env:
           NAMES: ${{ steps.unpack.outputs.names }}

@@ -16,29 +16,31 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # devkitPro recommends its prebuilt Docker toolchain images for CI;
+    # avoids the apt.devkitpro.org bootstrap endpoint that returned HTTP 403.
+    container:
+      image: devkitpro/devkitarm:latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install devkitARM
-        shell: bash
+      - name: Verify toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential curl git unzip
-          curl -fsSL https://apt.devkitpro.org/install-devkitpro-pacman | sudo bash
-          sudo dkp-pacman -Sy --noconfirm
-          sudo dkp-pacman -S --noconfirm gba-dev
-
-      - name: Configure environment
-        run: |
-          echo "/opt/devkitpro/devkitARM/bin" >> "$GITHUB_PATH"
-          echo "DEVKITPRO=/opt/devkitpro" >> "$GITHUB_ENV"
-          echo "DEVKITARM=/opt/devkitpro/devkitARM" >> "$GITHUB_ENV"
+          echo "DEVKITPRO=${DEVKITPRO:-/opt/devkitpro}"
+          echo "DEVKITARM=${DEVKITARM:-/opt/devkitpro/devkitARM}"
+          command -v arm-none-eabi-g++
+          arm-none-eabi-g++ --version
+          make --version
 
       - name: Fetch Butano
         run: git clone --depth 1 https://github.com/GValiente/butano.git butano
 
-      - name: Build ROM
-        run: make -j2
+      - name: Build ROM and preserve compiler log
+        shell: bash
+        run: |
+          mkdir -p build-logs
+          set -o pipefail
+          make -j2 2>&1 | tee build-logs/build.log
 
       - name: Validate ROM
         run: |
@@ -56,15 +58,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Preserve build logs
+      - name: Upload build logs
         if: always()
-        run: |
-          mkdir -p build-logs
-          echo "Workflow: $GITHUB_WORKFLOW" > build-logs/build-info.txt
-          echo "Run: $GITHUB_RUN_ID" >> build-logs/build-info.txt
-
-      - uses: actions/upload-artifact@v4
-        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: mvc2-gba-build-logs
           path: build-logs/
