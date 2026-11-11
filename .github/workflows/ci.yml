@@ -3,6 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "*.zip"
+      - "updates/**"
   pull_request:
   workflow_dispatch:
 
@@ -16,38 +19,53 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # devkitPro recommends its prebuilt Docker toolchain images for CI;
-    # avoids the apt.devkitpro.org bootstrap endpoint that returned HTTP 403.
-    container:
-      image: devkitpro/devkitarm:latest
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Verify toolchain
-        run: |
-          echo "DEVKITPRO=${DEVKITPRO:-/opt/devkitpro}"
-          echo "DEVKITARM=${DEVKITARM:-/opt/devkitpro/devkitARM}"
-          command -v arm-none-eabi-g++
-          arm-none-eabi-g++ --version
-          make --version
+      - name: Check out project
+        uses: actions/checkout@v4
 
       - name: Fetch Butano
         run: git clone --depth 1 https://github.com/GValiente/butano.git butano
 
-      - name: Build ROM and preserve compiler log
+      - name: Verify toolchain and build ROM in official devkitPro container
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p build-logs
-          set -o pipefail
-          make -j2 2>&1 | tee build-logs/build.log
+
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            --entrypoint /bin/bash \
+            devkitpro/devkitarm:20260610 \
+            -lc '
+              set -euo pipefail
+              export DEVKITPRO=/opt/devkitpro
+              export DEVKITARM="$DEVKITPRO/devkitARM"
+              export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+
+              echo "DEVKITPRO=$DEVKITPRO"
+              echo "DEVKITARM=$DEVKITARM"
+              echo "Compiler:"
+              command -v arm-none-eabi-g++
+              arm-none-eabi-g++ --version
+              echo "Make:"
+              command -v make
+              make --version
+
+              echo "Starting Butano GBA build..."
+              make -j2 2>&1 | tee build-logs/build.log
+            '
 
       - name: Validate ROM
+        shell: bash
         run: |
+          set -euo pipefail
           test -s mvc2_gba_fan_edition.gba
           size=$(stat -c%s mvc2_gba_fan_edition.gba)
-          test "$size" -ge 1024
-          test "$size" -le 33554432
+          if [ "$size" -lt 1024 ] || [ "$size" -gt 33554432 ]; then
+            echo "::error::ROM size is outside the expected GBA range: $size bytes"
+            exit 1
+          fi
           echo "ROM size: $size bytes"
 
       - name: Upload ROM
