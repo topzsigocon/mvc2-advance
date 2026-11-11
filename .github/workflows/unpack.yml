@@ -8,6 +8,8 @@ on:
       - 'updates/*.zip'
   workflow_dispatch:
 
+# This workflow may update project files and start CI, but it must never
+# modify files inside .github/ (including this workflow and ci.yml).
 permissions:
   contents: write
   actions: write
@@ -20,85 +22,89 @@ jobs:
   unpack:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Safely unpack the uploaded project ZIP
+      - name: Safely unpack project ZIP files (preserve all GitHub workflows)
         id: unpack
         shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           shopt -s nullglob
+
           zips=( *.zip updates/*.zip )
-          if [ ${#zips[@]} -eq 0 ]; then
+          if (( ${#zips[@]} == 0 )); then
+            echo "No update ZIP files found."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          names=()
-          for z in "${zips[@]}"; do
-            unzip -tq "$z" >/dev/null
+          processed=()
+          for zip_file in "${zips[@]}"; do
+            echo "Checking: $zip_file"
+            unzip -tq "$zip_file" >/dev/null
 
-            # Reject absolute paths, traversal, and symlinks before extraction.
-            if unzip -Z1 "$z" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
-              echo "::error::$z contains unsafe paths"
+            # Reject absolute paths, parent-directory traversal, Windows paths,
+            # backslash paths, and symbolic links before extracting anything.
+            if unzip -Z1 "$zip_file" | grep -Eq '(^/|(^|/)\.\.(/|$)|^[A-Za-z]:|\\\\)'; then
+              echo "::error::Unsafe path detected in $zip_file"
               exit 1
             fi
-            if zipinfo -l "$z" | awk 'NR > 3 && substr($1,1,1) == "l" { found=1 } END { exit !found }'; then
-              echo "::error::$z contains symbolic links"
-              exit 1
-            fi
-
-            tmp="$(mktemp -d)"
-            trap 'rm -rf "$tmp"' EXIT
-            unzip -q "$z" -d "$tmp"
-            src="$tmp"
-            mapfile -t top < <(find "$tmp" -mindepth 1 -maxdepth 1)
-            if [ ${#top[@]} -eq 1 ] && [ -d "${top[0]}" ] && [ -f "${top[0]}/README.md" ]; then
-              src="${top[0]}"
-            fi
-
-            # Add/update project files, but never bulk-overwrite repository metadata.
-            rsync -a --exclude='.git/' --exclude='.github/' --exclude='*.zip' "$src"/ ./
-
-            # The only workflow file this ZIP may replace is the build workflow.
-            # The running unpack workflow and all other repository workflows stay intact.
-            ci_source="$src/.github/workflows/ci.yml"
-            if [ -f "$ci_source" ]; then
-              mkdir -p .github/workflows
-              install -m 0644 "$ci_source" .github/workflows/ci.yml
-            else
-              echo "::error::ZIP must include .github/workflows/ci.yml"
+            if zipinfo -l "$zip_file" | awk 'NR > 3 && substr($1,1,1) == "l" { found=1 } END { exit !found }'; then
+              echo "::error::Symbolic links are not allowed in $zip_file"
               exit 1
             fi
 
-            git rm -q -f -- "$z"
-            rm -rf "$tmp"
-            trap - EXIT
-            names+=("$(basename "$z")")
+            temp_dir="$(mktemp -d)"
+            unzip -q "$zip_file" -d "$temp_dir"
+
+            source_dir="$temp_dir"
+            mapfile -t top_entries < <(find "$temp_dir" -mindepth 1 -maxdepth 1 -print)
+            if (( ${#top_entries[@]} == 1 )) && [[ -d "${top_entries[0]}" ]] && [[ -f "${top_entries[0]}/README.md" ]]; then
+              source_dir="${top_entries[0]}"
+            fi
+
+            # Add or update project files only. Never extract or overwrite
+            # .github/, .git/, ZIP archives, or any workflow configuration.
+            rsync -a \
+              --exclude='.git/' \
+              --exclude='.github/' \
+              --exclude='*.zip' \
+              "$source_dir"/ ./
+
+            rm -rf "$temp_dir"
+            git rm -q -f -- "$zip_file"
+            processed+=("$(basename "$zip_file")")
           done
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          printf 'names=%s\n' "${names[*]}" >> "$GITHUB_OUTPUT"
+          printf 'names=%s\n' "${processed[*]}" >> "$GITHUB_OUTPUT"
 
-      - name: Commit and push update
+      - name: Commit and push project update
         if: steps.unpack.outputs.changed == 'true'
         env:
-          NAMES: ${{ steps.unpack.outputs.names }}
+          UPDATE_NAMES: ${{ steps.unpack.outputs.names }}
           BRANCH: ${{ github.ref_name }}
+        shell: bash
         run: |
+          set -Eeuo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Unpack update: ${NAMES}"
+          if git diff --cached --quiet; then
+            echo "No project file changes to commit."
+            exit 0
+          fi
+          git commit -m "Unpack project update: ${UPDATE_NAMES}"
           git pull --rebase origin "$BRANCH"
           git push origin "HEAD:$BRANCH"
 
-      - name: Start CI build
+      - name: Start ROM build workflow
         if: steps.unpack.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.ref_name }}
+        shell: bash
         run: gh workflow run ci.yml --ref "$BRANCH"
