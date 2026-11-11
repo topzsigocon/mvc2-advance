@@ -1,4 +1,4 @@
-name: GBA ROM Build
+name: Marvel vs Capcom 2 GBA Build
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build One Piece Grand Pirate Clash
+    name: Build Marvel vs Capcom 2 GBA Fan Edition
     runs-on: ubuntu-latest
 
     container:
@@ -25,71 +25,52 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install image processing tools
-        run: |
-          apt-get update
-          apt-get install -y python3-pil
-
       - name: Get Butano Engine
         run: |
-          mkdir -p vendor
-          git clone --depth 1 https://github.com/GValiente/butano.git vendor/butano
+          mkdir -p butano
+          git clone --depth 1 https://github.com/GValiente/butano.git butano
 
-      - name: Fix title screen dimensions
+      - name: Show toolchain
         run: |
-          python3 - <<'PY'
-          from PIL import Image
-
-          path = "graphics/title_screen.bmp"
-          img = Image.open(path)
-
-          if img.mode != "P":
-              img = img.convert("P", palette=Image.Palette.ADAPTIVE, colors=256)
-
-          canvas = Image.new("P", (256, 256), 0)
-          canvas.putpalette(img.getpalette())
-          canvas.paste(img, (8, 48))
-          canvas.save(path, format="BMP")
-
-          check = Image.open(path)
-          print("Title screen dimensions:", check.size)
-
-          if check.size != (256, 256):
-              raise SystemExit("ERROR: Title screen dimensions are incorrect.")
-
-          print("Title screen successfully prepared.")
-          PY
+          echo "DEVKITPRO=$DEVKITPRO"
+          echo "DEVKITARM=$DEVKITARM"
+          command -v arm-none-eabi-g++
+          arm-none-eabi-g++ --version
+          make --version
 
       - name: Build GBA ROM
         run: make -j2
 
       - name: Validate GBA ROM
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist
 
-          ROM=$(find . -type f -name "*.gba" -not -path "./vendor/*" -print -quit)
+          ROM="mvc2_gba_fan_edition.gba"
 
-          if [ -z "$ROM" ]; then
-            echo "ERROR: No GBA ROM was generated."
+          if [ ! -s "$ROM" ]; then
+            echo "::error::Expected ROM was not generated: $ROM"
+            echo "GBA files found in the repository:"
+            find . -type f -name "*.gba" -not -path "./butano/*" -print
             exit 1
           fi
 
           SIZE=$(stat -c%s "$ROM")
 
-          if [ "$SIZE" -le 0 ]; then
-            echo "ERROR: ROM file is empty."
+          if [ "$SIZE" -lt 1024 ]; then
+            echo "::error::ROM is unexpectedly small ($SIZE bytes)."
             exit 1
           fi
 
           if [ "$SIZE" -gt 33554432 ]; then
-            echo "ERROR: ROM exceeds the 32 MB limit."
+            echo "::error::ROM exceeds the 32 MB GBA limit."
             exit 1
           fi
 
-          cp "$ROM" dist/One-Piece-Grand-Pirate-Clash.gba
-
+          cp "$ROM" dist/Marvel-vs-Capcom-2-GBA-Fan-Edition.gba
           cd dist
-          sha256sum One-Piece-Grand-Pirate-Clash.gba > SHA256SUMS.txt
+          sha256sum Marvel-vs-Capcom-2-GBA-Fan-Edition.gba > SHA256SUMS.txt
 
           echo "ROM successfully validated."
           ls -lh
@@ -97,7 +78,7 @@ jobs:
       - name: Upload GBA ROM
         uses: actions/upload-artifact@v4
         with:
-          name: one-piece-grand-pirate-clash-gba-rom
+          name: marvel-vs-capcom-2-gba-rom
           path: dist/
           if-no-files-found: error
           retention-days: 30
