@@ -13,47 +13,44 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Official devkitPro image – already has devkitARM + gba-dev packages
+    container:
+      image: devkitpro/devkitarm:latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install extra tools + clone Butano
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python3 python3-pip git unzip wget
+          which python3 || which python
+          which make
+          which arm-none-eabi-gcc
+          echo "DEVKITPRO=$DEVKITPRO"
+          echo "DEVKITARM=$DEVKITARM"
 
-      - name: Install devkitPro / devkitARM
-        run: |
-          # Official-ish non-interactive install for GBA
-          wget https://github.com/devkitPro/pacman/releases/download/v1.0.2/devkitpro-pacman.amd64.deb -O /tmp/dkp-pacman.deb
-          sudo dpkg -i /tmp/dkp-pacman.deb || true
-          sudo apt-get install -f -y
-          sudo dkp-pacman -Syu --noconfirm
-          sudo dkp-pacman -S --noconfirm gba-dev
-          echo "DEVKITPRO=/opt/devkitpro" >> $GITHUB_ENV
-          echo "DEVKITARM=/opt/devkitpro/devkitARM" >> $GITHUB_ENV
-          echo "PATH=$PATH:/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin" >> $GITHUB_ENV
-
-      - name: Setup Butano
-        run: |
           git clone --depth 1 https://github.com/GValiente/butano.git /tmp/butano
-          # Point Makefile to the cloned butano
           sed -i 's|LIBBUTANO    := ../butano/butano|LIBBUTANO    := /tmp/butano/butano|' Makefile
           ls -la /tmp/butano/butano
 
       - name: Build ROM
         run: |
-          export DEVKITPRO=/opt/devkitpro
-          export DEVKITARM=/opt/devkitpro/devkitARM
-          export PATH=$PATH:/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin
-          make -j$(nproc)
+          export DEVKITPRO=${DEVKITPRO:-/opt/devkitpro}
+          export DEVKITARM=${DEVKITARM:-/opt/devkitpro/devkitARM}
+          export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
+          make -j$(nproc) 2>&1 || make -j1 2>&1
 
       - name: Verify ROM exists
         run: |
           test -f mvc2_gba_fan.gba || { echo "ROM not found"; ls -la; exit 1; }
           ls -lh mvc2_gba_fan.gba
-          file mvc2_gba_fan.gba
+          file mvc2_gba_fan.gba || true
+          SIZE=$(stat -c%s mvc2_gba_fan.gba)
+          echo "ROM size: $SIZE bytes"
+          test $SIZE -gt 10000
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: mvc2-gba-fan-rom
           path: mvc2_gba_fan.gba
