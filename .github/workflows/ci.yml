@@ -1,85 +1,103 @@
-name: CI
+name: GBA ROM Build
 
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - "*.zip"
-      - "updates/**"
-  pull_request:
+    branches:
+      - main
   workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build One Piece Grand Pirate Clash
     runs-on: ubuntu-latest
+
+    container:
+      image: devkitpro/devkitarm:latest
+
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITARM: /opt/devkitpro/devkitARM
+
     steps:
-      - name: Check out project
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch Butano
-        run: git clone --depth 1 https://github.com/GValiente/butano.git butano
-
-      - name: Verify toolchain and build ROM in official devkitPro container
-        shell: bash
+      - name: Install image processing tools
         run: |
-          set -euo pipefail
-          mkdir -p build-logs
+          apt-get update
+          apt-get install -y python3-pil
 
-          docker run --rm \
-            --volume "${GITHUB_WORKSPACE}:/workspace" \
-            --workdir /workspace \
-            --entrypoint /bin/bash \
-            devkitpro/devkitarm:20260610 \
-            -lc '
-              set -euo pipefail
-              export DEVKITPRO=/opt/devkitpro
-              export DEVKITARM="$DEVKITPRO/devkitARM"
-              export PATH="$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH"
-
-              echo "DEVKITPRO=$DEVKITPRO"
-              echo "DEVKITARM=$DEVKITARM"
-              echo "Compiler:"
-              command -v arm-none-eabi-g++
-              arm-none-eabi-g++ --version
-              echo "Make:"
-              command -v make
-              make --version
-
-              echo "Starting Butano GBA build..."
-              make -j2 2>&1 | tee build-logs/build.log
-            '
-
-      - name: Validate ROM
-        shell: bash
+      - name: Get Butano Engine
         run: |
-          set -euo pipefail
-          test -s mvc2_gba_fan_edition.gba
-          size=$(stat -c%s mvc2_gba_fan_edition.gba)
-          if [ "$size" -lt 1024 ] || [ "$size" -gt 33554432 ]; then
-            echo "::error::ROM size is outside the expected GBA range: $size bytes"
+          mkdir -p vendor
+          git clone --depth 1 https://github.com/GValiente/butano.git vendor/butano
+
+      - name: Fix title screen dimensions
+        run: |
+          python3 - <<'PY'
+          from PIL import Image
+
+          path = "graphics/title_screen.bmp"
+          img = Image.open(path)
+
+          if img.mode != "P":
+              img = img.convert("P", palette=Image.Palette.ADAPTIVE, colors=256)
+
+          canvas = Image.new("P", (256, 256), 0)
+          canvas.putpalette(img.getpalette())
+          canvas.paste(img, (8, 48))
+          canvas.save(path, format="BMP")
+
+          check = Image.open(path)
+          print("Title screen dimensions:", check.size)
+
+          if check.size != (256, 256):
+              raise SystemExit("ERROR: Title screen dimensions are incorrect.")
+
+          print("Title screen successfully prepared.")
+          PY
+
+      - name: Build GBA ROM
+        run: make -j2
+
+      - name: Validate GBA ROM
+        run: |
+          mkdir -p dist
+
+          ROM=$(find . -type f -name "*.gba" -not -path "./vendor/*" -print -quit)
+
+          if [ -z "$ROM" ]; then
+            echo "ERROR: No GBA ROM was generated."
             exit 1
           fi
-          echo "ROM size: $size bytes"
 
-      - name: Upload ROM
+          SIZE=$(stat -c%s "$ROM")
+
+          if [ "$SIZE" -le 0 ]; then
+            echo "ERROR: ROM file is empty."
+            exit 1
+          fi
+
+          if [ "$SIZE" -gt 33554432 ]; then
+            echo "ERROR: ROM exceeds the 32 MB limit."
+            exit 1
+          fi
+
+          cp "$ROM" dist/One-Piece-Grand-Pirate-Clash.gba
+
+          cd dist
+          sha256sum One-Piece-Grand-Pirate-Clash.gba > SHA256SUMS.txt
+
+          echo "ROM successfully validated."
+          ls -lh
+
+      - name: Upload GBA ROM
         uses: actions/upload-artifact@v4
         with:
-          name: mvc2-gba-fan-edition-rom
-          path: mvc2_gba_fan_edition.gba
+          name: one-piece-grand-pirate-clash-gba-rom
+          path: dist/
           if-no-files-found: error
           retention-days: 30
-
-      - name: Upload build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mvc2-gba-build-logs
-          path: build-logs/
-          if-no-files-found: warn
