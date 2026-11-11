@@ -2,7 +2,7 @@
 
 **Unofficial, non-commercial fan project. Not affiliated with or endorsed by Marvel, Capcom, or Nintendo.**
 
-This repository is an **early Phase 1 engineering scaffold**, not the completed game and not yet a playable visual demo. It establishes a Butano/devkitARM C++ project, a first-pass combat-state model, build automation, and the ZIP-update workflow. The current main loop does not yet render fighters or a battle HUD, and no successful ROM build has been verified in this environment. The GitHub CI workflow is intended to produce the `.gba` artifact after the repository is uploaded and built successfully.
+This repository is an **early Phase 1 engineering scaffold (v0.1.2)**, not the completed game and not yet a playable visual demo. It establishes a Butano/devkitARM C++ project, a first-pass combat-state model, build automation, and the ZIP-update workflow. The current main loop does not yet render fighters or a battle HUD, and no successful ROM build has been verified in this environment. The GitHub CI workflow is intended to produce the `.gba` artifact after the repository is uploaded and built successfully.
 
 ## Current status
 
@@ -45,23 +45,22 @@ See the [official Butano devkitARM setup guide](https://gvaliente.github.io/buta
 
 ## GitHub Actions
 
-The `CI` workflow builds the ROM, checks that it exists and has a plausible GBA ROM size, then uploads the ROM and logs under **Actions → workflow run → Artifacts**.
+The `CI` workflow uses the official `devkitpro/devkitarm` container image instead of bootstrapping devkitPro from `apt.devkitpro.org`, clones Butano, builds the ROM, validates its size, and uploads the ROM and compiler log under **Actions → workflow run → Artifacts**.
 
 ### One-time GitHub setup (Tagalog)
 
 1. Gumawa ng GitHub repository at i-upload ang laman ng project ZIP.
 2. Sa **Settings → Actions → General → Workflow permissions**, piliin ang **Read and write permissions**, pagkatapos Save. (Kailangan ito ng unpack workflow para makapag-commit ng ZIP updates.)
-3. Ilagay ang workflow files sa `.github/workflows/` sa pamamagitan ng normal na repository upload o **Add file → Create new file**. Tandaan: ang `unpack.yml` ay hindi nagbabago ng `.github/` files.
-4. Buksan ang **Actions** at i-enable ang workflows kung hihingin.
-5. Para sa ROM: **Actions → CI → Run workflow**. Pagkatapos ng successful run, kunin ang `.gba` sa **Artifacts**.
+3. Sa unang setup lang, ilagay ang `.github/workflows/unpack.yml` sa repository gamit ang **Add file → Create new file** o GitHub web upload. I-enable ang Actions workflows kung hihingin. Ang kasunod na updates ay iisang ZIP na lang.
+4. Para sa unang ROM build, buksan ang **Actions → CI → Run workflow**. Pagkatapos ng successful run, kunin ang `.gba` sa **Artifacts**.
 
 ### Paano mag-update gamit ang ZIP
 
-1. Gumawa ng ZIP na may buong project folder (wrapper folder) o patch files lamang.
-2. I-upload ang ZIP sa repository root o sa `updates/`.
-3. Awtomatikong susuriin ang ZIP paths, ia-unpack ito (additive lamang), buburahin ang uploaded ZIP, magko-commit, at tatawagin ang CI workflow.
-4. Tingnan ang **Actions → CI → Artifacts** para sa bagong ROM.
-5. Ang unpack ay hindi nagde-delete ng lumang source files. Kung kailangang magtanggal ng file, gawin iyon nang mano-mano.
+1. I-upload ang iisang buong project ZIP sa repository root (huwag sa `updates/` kung root upload ang gamit). Dapat kasama sa ZIP ang `README.md` at `.github/workflows/ci.yml`.
+2. Awtomatikong ive-verify ang ZIP, ia-update ang project files, at papalitan lamang ang `.github/workflows/ci.yml` mula sa ZIP. Hindi nito papalitan ang kasalukuyang `unpack.yml`, Dependabot, o ibang workflow files.
+3. Awtomatikong aalisin ang uploaded ZIP, gagawa ng commit, at tatawagin ang CI build.
+4. Tingnan ang **Actions → CI → Artifacts** para sa `.gba` ROM at build logs.
+5. Additive ang source update: hindi nito binubura ang lumang source files. Kung kailangang magtanggal ng file, gawin iyon nang mano-mano.
 6. Huwag kailanman maglagay ng passwords, keys, tokens, o secrets sa ZIP/repository.
 
 ## License and asset policy
