@@ -50,7 +50,7 @@ jobs:
           test $SIZE -gt 10000
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mvc2-gba-fan-rom
           path: mvc2_gba_fan.gba
